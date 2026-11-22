@@ -73,6 +73,57 @@ npm run dev
 | 用量计费 | `cost_account` | 用量账单 | 账单编号、提供方、计费周期 |
 | 任务调度 | `task_schedule` | 调度计划 | 计划编号、关联端点、Cron表达式 |
 
+## 调用耗时标准化（迁移口径）
+
+调用日志同时存在两类历史耗时：人工登记的 `响应耗时`（可能带单位，如 `0.2 s`，
+也可能只有数值 `32`）和采集动作自动写入的 `响应耗时(ms)`。监控/统计统一读取
+`规范耗时(ms)`，旧字段原样保留，绝不按零延迟或默认单位入账。
+
+标准字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `规范耗时(ms)` | 换算后的毫秒数；单位不可确定时为空 |
+| `耗时单位` / `耗时换算依据` | 原始单位与换算关系，如 `1 s = 1000 ms` |
+| `耗时来源字段` | 实际采用的旧字段 |
+| `耗时迁移状态` | 已换算 / 未换算 / 已回滚 |
+| `耗时回填批次` / `耗时修订` | 写入批次与重算次数，便于追溯 |
+| `耗时未换算原因` | 缺单位、负值、无法解析等可读原因 |
+
+操作接口：
+
+```bash
+# 影子核对（不写标准字段）
+curl -X POST 127.0.0.1:8000/api/call-duration/backfill -H 'Content-Type: application/json' -d '{"dry_run":true}'
+# 按批回填，中断后再次调用会续跑同一批次
+curl -X POST 127.0.0.1:8000/api/call-duration/backfill -H 'Content-Type: application/json' -d '{"limit":2}'
+# 校对缺单位旧值（例如把 CALL-0003 的 32 按毫秒重新入账）
+curl -X POST 127.0.0.1:8000/api/call-duration/recompute -H 'Content-Type: application/json' -d '{"record_no":"CALL-0003","unit":"ms"}'
+# 回滚标准字段，旧字段保持可读
+curl -X POST 127.0.0.1:8000/api/call-duration/rollback -H 'Content-Type: application/json' -d '{}'
+# 部署后报告：实际采用耗时、换算依据、样本分母、未转换记录、旧字段可读性
+curl 127.0.0.1:8000/api/call-duration/report
+# 单笔耗时溯源
+curl 127.0.0.1:8000/api/call-duration/records/CALL-0001
+```
+
+要点：
+
+- 可确定单位的旧值换算后毫秒数不变（`0.2 s → 200`，自动写入的 `120 → 120`）；
+- 缺单位旧值（如 `32`）标记 `未换算`，计入未转换清单，监控分母剔除；
+- 回填中断时监控对混合记录实时回退旧字段计算，标准值缺失不影响统计；
+- 回填支持分批续跑、影子核对、完成校对、回滚后重算，重复提交同一 `记录编号`
+  的调用只保留一条；
+- 接口监控启用时按规范耗时计算区间延迟（均值/P50/P95），并把结果回写到监控
+  指标行；治理与计费读取的指标同样使用该口径。
+
+回归测试（标准库 unittest，无需额外依赖）：
+
+```bash
+cd backend
+.venv/bin/python -m unittest discover -s tests -v
+```
+
 ## 约定
 
 - 全部模块共享`frontend/src/views/WorkbenchView.vue|tsx`和一套资源路由。

@@ -1,6 +1,7 @@
 """重放队列领域服务：管理失败请求重试，与 request_batch、call_log、api_monitor 联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -46,6 +47,7 @@ class RetryQueueService(BaseModuleService):
             "调用时间": "2026-11-17",
             "status": "超时", "pending": True, "abnormal": True,
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _log_retry_success(self, task: dict):
         tid = str(task["id"]).zfill(4)
@@ -55,6 +57,8 @@ class RetryQueueService(BaseModuleService):
                 log["响应状态"] = "200"
                 log["响应耗时(ms)"] = 150
                 log["返回行数"] = 1
+                # 旧字段更新后同步重算标准耗时，避免监控继续读到历史标准值。
+                call_duration.standardize_record(log, batch_id="PIPELINE")
                 break
 
     def _update_monitor_health(self, task: dict):

@@ -1,6 +1,7 @@
 """数据投递领域服务：管理数据管道投递，与 subscriber、call_log、govern_report、data_version 联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -65,6 +66,7 @@ class DataDeliveryService(BaseModuleService):
             "pending": event != "error",
             "abnormal": event == "error",
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _create_data_version(self, delivery: dict):
         """投递完成创建数据版本快照。"""

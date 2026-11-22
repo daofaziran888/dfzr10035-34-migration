@@ -18,6 +18,10 @@ export type ModuleMeta = {
   actions: string[]
   actionTargets: Record<string, string>
   metrics: string[]
+  /** 登记表单展示字段；缺省时沿用全部字段。 */
+  createFields?: string[]
+  /** 登记表单必填字段；缺省时沿用展示字段。规范耗时等派生字段不参与必填。 */
+  requiredFields?: string[]
 }
 
 export type PageResult = {

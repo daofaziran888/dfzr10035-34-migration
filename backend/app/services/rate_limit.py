@@ -1,6 +1,7 @@
 """限流熔断领域服务：管理请求速率限制，与调用日志、重放队列联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -86,6 +87,7 @@ class RateLimitService(BaseModuleService):
             "调用时间": "2026-11-17",
             "status": "限流拒绝", "pending": False, "abnormal": True,
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _on_circuit_restore(self, limit: dict):
         """恢复后清理关联重放任务并刷新缓存状态。"""

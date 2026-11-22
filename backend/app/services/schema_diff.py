@@ -1,6 +1,7 @@
 """Schema差异检测领域服务：管理API Schema变更差异，与 endpoint_def、govern_report、data_version 联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -87,6 +88,7 @@ class SchemaDiffService(BaseModuleService):
             "调用时间": "2026-11-17",
             "status": "成功", "pending": False, "abnormal": False,
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def calc_schema_health(self) -> dict:
         """跨模块Schema健康度。"""

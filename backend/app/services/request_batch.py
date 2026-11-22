@@ -1,6 +1,7 @@
 """请求批次领域服务：管理批量API请求，与端点定义、调用日志、重放队列、结果缓存联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -46,6 +47,7 @@ class RequestBatchService(BaseModuleService):
             "调用时间": "2026-11-17",
             "status": "超时", "pending": True, "abnormal": False,
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _on_batch_complete(self, batch: dict, action: str):
         """批次完成时联动：更新调用日志最终状态，同步数据版本。"""
@@ -56,6 +58,7 @@ class RequestBatchService(BaseModuleService):
                 log["响应耗时(ms)"] = batch.get("超时上限", 5000)
                 log["返回行数"] = batch.get("完成数量", 0)
                 log["错误信息"] = "" if action == "取消批次" else f"失败{batch.get('失败数量', 0)}项"
+                call_duration.standardize_record(log, batch_id="PIPELINE")
                 break
 
     def _enqueue_retry(self, batch: dict):

@@ -1,6 +1,7 @@
 """传输加密领域服务：管理数据传输加密配置，与 auth_profile、call_log、subscriber、govern_report 联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -71,6 +72,7 @@ class DataEncryptService(BaseModuleService):
             "调用时间": "2026-11-17",
             "status": "成功", "pending": False, "abnormal": False,
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _notify_subscribers_cert_update(self, encrypt: dict):
         """通知订阅方证书已更新。"""

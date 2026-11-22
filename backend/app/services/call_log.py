@@ -1,6 +1,14 @@
-"""调用日志领域服务：管理API调用记录，与 retry_queue、api_monitor、rate_limit、govern_report 联动。"""
+"""调用日志领域服务：管理API调用记录，与 retry_queue、api_monitor、rate_limit、govern_report 联动。
+
+耗时字段约定：``响应耗时``（人工登记）和 ``响应耗时(ms)``（动作自动写入）
+是历史字段，只读保留；监控/统计统一读取 ``规范耗时(ms)``，由
+``call_duration`` 负责换算、回填、回滚与报告。
+"""
 from __future__ import annotations
 
+from typing import Any
+
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -9,14 +17,85 @@ class CallLogService(BaseModuleService):
     MODULE = "call_log"
     ENTITY = "调用记录"
     OPERATION_TERM = "校验"
-    LIST_FIELDS = ["记录编号", "接口端点", "请求参数", "响应状态", "响应耗时", "返回行数", "错误信息", "调用时间"]
+    LIST_FIELDS = [
+        "记录编号", "接口端点", "请求参数", "响应状态",
+        call_duration.CANONICAL_FIELD, "耗时单位", "耗时换算依据",
+        "耗时迁移状态", call_duration.LEGACY_MANUAL, call_duration.LEGACY_AUTO,
+        "返回行数", "错误信息", "调用时间",
+    ]
     REQUIRED_FIELDS = ["记录编号", "接口端点", "请求参数"]
     STATUS_ORDER = ["成功", "超时", "限流拒绝", "鉴权失败"]
-    ACTION_RULES = {"标记审计": "超时", "标记重试": "限流拒绝"}
+    ACTION_RULES = {
+        "标记审计": "超时",
+        "标记重试": "限流拒绝",
+        "执行耗时回填": None,
+        "校对耗时单位": None,
+        "回滚耗时回填": None,
+        "重算耗时": None,
+    }
     NEGATIVE_ACTIONS = []
 
-    def run_action(self, entry_id: int, action: str):
-        """标记审计时联动流水审计；标记重试时创建重放任务并检索引用追踪状态。"""
+    def create_entry(self, values: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+        """登记调用记录：同一记录编号幂等，只保留一笔。"""
+        missing = [
+            field for field in self.REQUIRED_FIELDS
+            if not str(values.get(field) or "").strip()
+        ]
+        if missing:
+            return None, missing
+        result = call_duration.ingest_call(values)
+        if not result["ok"]:
+            return None, [result["message"]]
+        return result["entry"], []
+
+    def run_action(self, entry_id: int, action: str) -> tuple[dict[str, Any] | None, str]:
+        """标记审计时联动流水审计；标记重试时创建重放任务；耗时动作走迁移域。"""
+        if action == "执行耗时回填":
+            entry = store.find(self.MODULE, entry_id)
+            if entry is None:
+                return None, f"{self.ENTITY} {entry_id} 不存在或已归档"
+            summary = call_duration.run_backfill()
+            return entry, (
+                f"耗时回填批次{summary['batch_id']}已执行"
+                f"，本次处理{summary['processed_this_run']}条，剩余{summary['remaining']}条"
+            )
+        if action == "校对耗时单位":
+            entry = store.find(self.MODULE, entry_id)
+            if entry is None:
+                return None, f"{self.ENTITY} {entry_id} 不存在或已归档"
+            record_no = str(entry.get("记录编号"))
+            result = call_duration.recompute(record_no=record_no)
+            if not result["ok"]:
+                return entry, result["message"]
+            resolution = call_duration.resolve_effective(entry)
+            if resolution["resolved"]:
+                message = (
+                    f"已按旧字段校对耗时：{resolution['ms']}ms"
+                    f"（{resolution['unit']}，{resolution['basis']}）"
+                )
+            else:
+                message = f"仍无法确定单位：{resolution.get('reason')}"
+            return entry, message
+        if action == "回滚耗时回填":
+            entry = store.find(self.MODULE, entry_id)
+            if entry is None:
+                return None, f"{self.ENTITY} {entry_id} 不存在或已归档"
+            result = call_duration.rollback()
+            return entry, (
+                f"已回滚耗时回填，影响{result['affected']}条记录，旧字段保持可读"
+            )
+        if action == "重算耗时":
+            entry = store.find(self.MODULE, entry_id)
+            if entry is None:
+                return None, f"{self.ENTITY} {entry_id} 不存在或已归档"
+            result = call_duration.recompute()
+            if not result["ok"]:
+                return entry, result["message"]
+            return entry, (
+                f"已重算{result['processed']}条调用耗时"
+                f"，换算{result['converted']}条，未换算{result['unconverted']}条"
+            )
+
         entry, message = super().run_action(entry_id, action)
         if entry is None:
             return entry, message
@@ -72,17 +151,27 @@ class CallLogService(BaseModuleService):
                 tracker["最后同步"] = "2026-11-17"
 
     def calc_call_metrics(self, endpoint: str) -> dict:
-        """跨模块调用指标：汇总日志+重试+监控+限流+治理。"""
+        """跨模块调用指标：汇总日志+重试+监控+限流+治理。
+
+        平均延迟按规范耗时计算，分母剔除单位不可确定的记录。
+        """
         logs = [l for l in store.rows("call_log") if l.get("接口端点") == endpoint]
         retries = [r for r in store.rows("retry_queue") if r.get("失败端点") == endpoint]
         monitors = [m for m in store.rows("api_monitor") if m.get("目标端点") == endpoint]
         rate_limits = [rl for rl in store.rows("rate_limit") if rl.get("目标端点") == endpoint]
+        latency = call_duration.latency_summary(logs)
         return {
             "endpoint": endpoint,
             "total_calls": len(logs),
             "success_rate": sum(1 for l in logs if l.get("status") == "成功") / len(logs) if logs else 1.0,
-            "avg_latency_ms": sum(int(l.get("响应耗时(ms)", 0)) for l in logs) / len(logs) if logs else 0,
+            "avg_latency_ms": latency["avg_latency_ms"],
+            "latency_sample_used": latency["sample_used"],
+            "latency_unconverted": latency["unconverted"],
             "pending_retries": len(retries),
             "monitors_active": sum(1 for m in monitors if m.get("status") == "监控中"),
             "rate_limits_active": sum(1 for rl in rate_limits if rl.get("status") == "生效中"),
         }
+
+    def duration_report(self) -> dict:
+        """调用耗时部署后报告：实际采用值、换算依据、分母与未转换记录。"""
+        return call_duration.migration_report()

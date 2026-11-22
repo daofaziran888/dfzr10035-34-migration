@@ -1,6 +1,7 @@
 """增量追踪领域服务：管理数据增量游标追踪，与 request_batch、call_log、retry_queue、data_version 联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -47,6 +48,7 @@ class IncrTrackerService(BaseModuleService):
             "调用时间": "2026-11-17",
             "status": "成功", "pending": False, "abnormal": False,
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _check_call_logs_for_cursor(self, tracker: dict):
         """从调用日志回填游标位置。"""

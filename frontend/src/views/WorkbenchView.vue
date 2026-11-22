@@ -73,9 +73,13 @@
     <div v-if="showCreate" class="modal-backdrop" data-testid="create-modal">
       <form class="modal" @submit.prevent="submitCreate">
         <h3>登记{{ meta.entity }}</h3>
-        <label v-for="field in meta.fields" :key="field" class="create-field">
+        <label v-for="field in createFields" :key="field" class="create-field">
           <span>{{ field }}</span>
-          <input v-model="createValues[field]" :data-testid="`create-${field}`" required />
+          <input
+            v-model="createValues[field]"
+            :data-testid="`create-${field}`"
+            :required="requiredFields.includes(field)"
+          />
         </label>
         <div class="page-actions">
           <button class="btn" type="button" @click="showCreate = false">取消</button>
@@ -115,6 +119,9 @@ const filterFields = meta.fields.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
+// 规范耗时等派生字段由后端换算，登记表单不展示、也不要求手工填写。
+const createFields = meta.createFields?.length ? meta.createFields : meta.fields
+const requiredFields = meta.requiredFields ?? createFields
 const stats = computed(() => [
   { label: meta.metrics[0], value: total.value },
   { label: meta.metrics[1], value: rows.value.filter((row) => row.status === meta.statuses[1]).length },
@@ -145,7 +152,7 @@ async function exportRows() {
 }
 
 function openCreate() {
-  createValues.value = Object.fromEntries(meta.fields.map((field) => [field, '']))
+  createValues.value = Object.fromEntries(createFields.map((field) => [field, '']))
   errorMessage.value = ''
   showCreate.value = true
 }

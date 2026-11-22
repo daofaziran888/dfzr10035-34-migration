@@ -1,6 +1,7 @@
 """响应解析领域服务：管理响应解析规则，与Schema差异检测、数据缓存、数据投递联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -71,6 +72,7 @@ class ResponseParseService(BaseModuleService):
             "调用时间": "2026-11-17",
             "status": "超时", "pending": True, "abnormal": True,
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _trigger_data_delivery_retry(self, rule: dict):
         """废弃规则时通知数据投递管道重新采集。"""

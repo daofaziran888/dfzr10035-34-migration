@@ -1,6 +1,7 @@
 """数据版本领域服务：管理数据快照版本，与 data_delivery、subscriber、schema_diff、govern_report 联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -59,6 +60,7 @@ class DataVersionService(BaseModuleService):
             "调用时间": "2026-11-17",
             "status": "成功", "pending": False, "abnormal": False,
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _create_govern_report(self, version: dict):
         gov_rows = store.rows("govern_report")

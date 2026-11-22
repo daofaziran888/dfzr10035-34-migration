@@ -1,6 +1,7 @@
 """管道审计领域服务：管理操作审计记录，与 govern_report、call_log、data_version 联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -66,6 +67,7 @@ class PipelineAuditService(BaseModuleService):
             "pending": action != "approved",
             "abnormal": action != "approved",
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _create_data_version(self, audit: dict):
         ver_rows = store.rows("data_version")

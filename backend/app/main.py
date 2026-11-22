@@ -7,11 +7,17 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.routers import ROUTERS
 from app.store import store
 from app.services import SERVICE_REGISTRY
+from app.services import call_duration
+from app.services.call_log import CallLogService
+
+
+_call_log_service = CallLogService()
 
 
 app = FastAPI(title="网关工坊 · API接口采集与数据网关平台", version="1.0.0")
@@ -184,6 +190,84 @@ def chain_encrypt_coverage():
     """链路21：加密覆盖度（跨 data_encrypt/auth_profile/subscriber）"""
     from app.services.data_encrypt import DataEncryptService
     return DataEncryptService().check_encrypt_coverage()
+
+
+# ---------- 调用耗时标准化：回填 / 回滚 / 重算 / 报告 ----------
+
+class BackfillPayload(BaseModel):
+    limit: int | None = Field(default=None, ge=0)
+    dry_run: bool = False
+    batch_id: str | None = None
+
+
+class RecomputePayload(BaseModel):
+    record_no: str | None = None
+    unit: str | None = None
+    batch_id: str | None = None
+    dry_run: bool = False
+
+
+class RollbackPayload(BaseModel):
+    batch_id: str | None = None
+
+
+@app.get("/api/call-duration/status")
+def call_duration_status():
+    """耗时标准化当前阶段：批次数、分母、未换算数量。"""
+    return call_duration.migration_status()
+
+
+@app.post("/api/call-duration/backfill")
+def call_duration_backfill(payload: BackfillPayload):
+    """执行或续跑耗时回填；limit 支持分期上线，dry_run 做影子核对。"""
+    return call_duration.run_backfill(
+        limit=payload.limit, dry_run=payload.dry_run, batch_id=payload.batch_id)
+
+
+@app.post("/api/call-duration/rollback")
+def call_duration_rollback(payload: RollbackPayload):
+    """回滚标准耗时字段，旧字段保持可读。"""
+    return call_duration.rollback(batch_id=payload.batch_id)
+
+
+@app.post("/api/call-duration/recompute")
+def call_duration_recompute(payload: RecomputePayload):
+    """按旧字段重算标准耗时，可校对缺单位旧值的单位。"""
+    return call_duration.recompute(
+        record_no=payload.record_no, unit=payload.unit,
+        batch_id=payload.batch_id, dry_run=payload.dry_run)
+
+
+@app.get("/api/call-duration/report")
+def call_duration_report():
+    """部署后报告：实际采用的耗时、换算依据、样本分母与未转换记录。"""
+    return _call_log_service.duration_report()
+
+
+@app.get("/api/call-duration/records/{record_no}")
+def call_duration_record(record_no: str):
+    """单笔调用的耗时溯源：旧字段原文、标准值、单位与换算依据。"""
+    record = next(
+        (row for row in store.rows("call_log") if str(row.get("记录编号")) == record_no),
+        None,
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"调用记录 {record_no} 不存在")
+    effective = call_duration.resolve_effective(record)
+    return {
+        "记录编号": record.get("记录编号"),
+        "legacy": effective.get("legacy"),
+        "adopted": {
+            "ms": effective.get("ms"),
+            "unit": effective.get("unit"),
+            "basis": effective.get("basis"),
+            "source_field": effective.get("source_field"),
+            "source_kind": effective.get("source_kind"),
+        },
+        "migration_status": record.get(call_duration.STATUS_FIELD),
+        "reason": effective.get("reason"),
+        "entry": record,
+    }
 
 
 @app.get("/api/chain/snapshot")

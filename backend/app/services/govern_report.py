@@ -1,6 +1,7 @@
 """治理报告领域服务：管理数据质量与合规报告，与 pipeline_audit、data_version、call_log、api_monitor 联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -88,6 +89,7 @@ class GovernReportService(BaseModuleService):
             "调用时间": "2026-11-17",
             "status": "成功", "pending": False, "abnormal": False,
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _snapshot_data_version(self, report: dict):
         """归档时创建数据版本快照。"""

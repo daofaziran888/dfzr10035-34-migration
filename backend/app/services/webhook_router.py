@@ -1,6 +1,7 @@
 """Webhook路由领域服务：管理回调路由规则，与 subscriber、call_log、data_delivery、pipeline_audit 联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -90,6 +91,7 @@ class WebhookRouterService(BaseModuleService):
             "pending": event_type != "enabled",
             "abnormal": event_type != "enabled",
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _update_subscriber_status(self, wh: dict):
         event = wh.get("触发事件", "")

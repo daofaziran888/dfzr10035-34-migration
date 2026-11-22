@@ -1,6 +1,7 @@
 """订阅管理领域服务：管理数据订阅，与 webhook_router、data_version、call_log、data_cache 联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -82,6 +83,7 @@ class SubscriberService(BaseModuleService):
             "调用时间": "2026-11-17",
             "status": "成功", "pending": False, "abnormal": False,
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _cleanup_cache_refs(self, sub: dict):
         """停订时清理关联缓存策略引用标记。"""

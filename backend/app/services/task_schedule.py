@@ -1,6 +1,7 @@
 """任务调度领域服务：管理定时调度计划，与 request_batch、task_schedule、call_log、retry_queue、incr_tracker 联动。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -86,6 +87,7 @@ class TaskScheduleService(BaseModuleService):
             "调用时间": "2026-11-17",
             "status": "成功", "pending": False, "abnormal": False,
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def _update_data_version(self, schedule: dict):
         """回调执行完成后创建数据版本。"""

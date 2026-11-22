@@ -1,6 +1,7 @@
 """API提供方领域服务：管理API源注册，编排下游鉴权、限流、端点、监控的联动创建。"""
 from __future__ import annotations
 
+from app.services import call_duration
 from app.services.base import BaseModuleService
 from app.store import store
 
@@ -114,6 +115,7 @@ class ApiProviderService(BaseModuleService):
             "调用时间": provider.get("注册时间", ""),
             "status": "成功", "pending": True, "abnormal": False,
         })
+        call_duration.standardize_record(log_rows[-1], batch_id="PIPELINE")
 
     def check_sla_health(self, provider_id: int) -> dict:
         """跨模块SLA巡检：读取关联的限流/监控/用量数据评估健康度。"""
